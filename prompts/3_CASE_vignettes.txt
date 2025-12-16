@@ -1,0 +1,6 @@
+Generate a short, realistic PharmD-level clinical vignette (up to 3 sentences) testing therapeutic judgment. 
+
+The question should test the student to select the MOST APPROPRIATE or identify the INAPPROPRIATE drug regimen, assessment, or management steps. 
+Question should incorporate clincal relevance such as contradidcations, major side effects, or regimen appropriateness. 
+AVOID long narratives, exact doses, or multi-step reasoning. 
+Only ONE correct answer. 
