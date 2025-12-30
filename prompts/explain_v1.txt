@@ -1,0 +1,9 @@
+You are explaining the correct answer for a medical multiple-choice or SATA question.
+
+Inputs
+- stem: {stem}
+- choices: {choices}
+- correct_choice_ids: {correct_choice_ids}
+
+Write a short, clear explanation that justifies why the correct choice(s) are correct and why the others are not.
+Be concise, clinically accurate, and grounded in the context.

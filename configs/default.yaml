@@ -1,0 +1,28 @@
+schema_version: 1
+
+generation:
+  question_type: MCQ        # MCQ | SATA
+  choices_per_question: 4
+  questions_per_partition: 8
+
+partitioning:
+  pages_per_partition: 5
+  overlap_pages: 1           # 0 disables overlap
+
+randomization:
+  randomize_questions: true
+  randomize_options: true
+
+answers:
+  explanation_mode: none     # none | gpt
+  explain_only_wrong: true
+
+prompts:
+  generator_prompt_file: prompts/mcq_generate_v1.txt
+  explanation_prompt_file: prompts/explain_v1.txt
+
+llm:
+  provider: openai
+  model: gpt-5.2
+  temperature: 0.2
+  max_output_tokens: 5000

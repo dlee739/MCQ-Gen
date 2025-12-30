@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "run_id": "2025-12-30_01-55-58__e5_3_Osteoporosis",
+  "created_at": "2025-12-30T01:55:58-05:00",
+  "context_file": "e5.3_Osteoporosis.pdf",
+  "config_file": "configs\\default.yaml",
+  "prompt_files": {
+    "generator": "prompts/mcq_generate_v1.txt",
+    "explanation": "prompts/explain_v1.txt"
+  },
+  "llm": {
+    "provider": "openai",
+    "model": "gpt-5.2",
+    "temperature": 0.2,
+    "max_output_tokens": 5000
+  }
+}
