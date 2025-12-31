@@ -1,0 +1,33 @@
+----------------------------------------------------------------------------------
+
+Inputs
+- question_type: {question_type}
+- choices_per_question: {choices_per_question}
+- questions_per_partition: {questions_per_partition}
+- correct_counts_note: {correct_counts_note}
+- context:
+{context}
+
+Return JSON that matches this shape exactly:
+{{
+  "questions": [
+    {{
+      "stem": "...",
+      "choices": [
+        {{"id": "c1", "text": "..."}},
+        {{"id": "c2", "text": "..."}}
+      ],
+      "correct_choice_ids": ["c2"]
+    }}
+  ]
+}}
+
+Rules
+- Return exactly {questions_per_partition} questions.
+- Each question must have exactly {choices_per_question} choices.
+- Use stable choice ids c1..c{choices_per_question} in order.
+- correct_choice_ids must be a subset of the choice ids.
+- For SATA, follow correct_counts_note exactly.
+- Use medical terminology and include clinically relevant details from context.
+- Keep stems clear and self-contained; avoid "All of the above".
+- Do not add extra keys or commentary.

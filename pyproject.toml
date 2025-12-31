@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcqgen"
+version = "0.1.0"
+description = "MCQ generator for medical context using LLMs."
+requires-python = ">=3.9"
+dependencies = [
+  "typer>=0.9",
+  "PyYAML>=6.0",
+  "PyMuPDF>=1.23",
+  "openai>=2.0",
+  "streamlit>=1.32"
+]
+
+[project.scripts]
+mcqgen = "mcqgen.cli:app"
+
+[tool.setuptools]
+packages = ["mcqgen"]

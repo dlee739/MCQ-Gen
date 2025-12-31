@@ -1,13 +1,34 @@
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from openai import OpenAI
 
 
+def _read_api_key_from_file(path: Path) -> Optional[str]:
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    for line in raw.splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            return line
+    return None
+
+
 def make_client() -> OpenAI:
-    # Uses OPENAI_API_KEY from env automatically
+    # Uses OPENAI_API_KEY from env automatically, or .openai_key in repo root.
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        key_path = Path(__file__).resolve().parents[1] / ".openai_key"
+        if key_path.exists():
+            api_key = _read_api_key_from_file(key_path)
+    if api_key:
+        return OpenAI(api_key=api_key)
     return OpenAI()
 
 

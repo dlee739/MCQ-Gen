@@ -1,94 +1,26 @@
 from __future__ import annotations
 
-import json
-import os
-import random
-import shutil
-from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-import logging
-import sys
 
 import typer
-import yaml
-from mcqgen.mock_llm import mock_generate_questions_for_chunk
-from mcqgen.llm_client import make_client
+
+from mcqgen.explain import add_explanations_for_wrong_questions
 from mcqgen.generate import llm_generate_questions_for_chunk
-from mcqgen.pdf_extract import extract_pdf_pages_to_jsonl
+from mcqgen.io_utils import read_json, read_yaml, write_json, write_jsonl
+from mcqgen.llm_client import make_client
+from mcqgen.logging_utils import setup_run_logger
+from mcqgen.mock_llm import mock_generate_questions_for_chunk
 from mcqgen.pages import load_pages_map, build_chunk_text
+from mcqgen.pdf_extract import extract_pdf_pages_to_jsonl
+from mcqgen.postprocess import postprocess_questions
+from mcqgen.run_utils import make_chunks, make_run_id, now_iso_local
 
 app = typer.Typer(no_args_is_help=True)
-
-# LOGGER SETUP
-
-def setup_run_logger(run_dir: Path, verbose: bool = False) -> logging.Logger:
-    run_dir.mkdir(parents=True, exist_ok=True)
-    log_path = run_dir / "run.log"
-
-    logger = logging.getLogger(f"mcqgen.{run_dir.name}")
-    logger.setLevel(logging.DEBUG)
-    logger.propagate = False  # avoid duplicate logs if root logger exists
-
-    # Clear handlers if reusing in tests/dev
-    logger.handlers.clear()
-
-    fmt = logging.Formatter(
-        fmt="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S"
-    )
-
-    file_handler = logging.FileHandler(log_path, encoding="utf-8")
-    file_handler.setLevel(logging.DEBUG)
-    file_handler.setFormatter(fmt)
-    logger.addHandler(file_handler)
-
-    # Console handler for user feedback
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(logging.DEBUG if verbose else logging.INFO)
-    console_handler.setFormatter(logging.Formatter("%(message)s"))
-    logger.addHandler(console_handler)
-
-    logger.debug("Logger initialized. Log file: %s", log_path)
-    return logger
-
 
 # -------------------------
 # Utilities
 # -------------------------
-
-def now_iso_local() -> str:
-    # Toronto offset isn't critical here; keep it simple for v1.
-    return datetime.now().astimezone().isoformat(timespec="seconds")
-
-def slugify(name: str) -> str:
-    keep = []
-    for ch in name:
-        if ch.isalnum() or ch in ("-", "_"):
-            keep.append(ch)
-        elif ch in (" ", "."):
-            keep.append("_")
-    return "".join(keep).strip("_")
-
-def read_yaml(path: Path) -> Dict[str, Any]:
-    with path.open("r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
-
-def write_json(path: Path, obj: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as f:
-        json.dump(obj, f, indent=2, ensure_ascii=False)
-
-def read_json(path: Path) -> Any:
-    with path.open("r", encoding="utf-8") as f:
-        return json.load(f)
-
-def write_jsonl(path: Path, rows: List[Dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as f:
-        for row in rows:
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 def list_pdfs(contexts_dir: Path) -> List[Path]:
     if not contexts_dir.exists():
@@ -150,8 +82,12 @@ def validate_config(cfg: Dict[str, Any]) -> None:
     if not isinstance(ans.get("explain_only_wrong"), bool):
         raise typer.BadParameter("answers.explain_only_wrong must be boolean")
 
-    if not Path(prompts.get("generator_prompt_file", "")).exists():
-        raise typer.BadParameter("prompts.generator_prompt_file does not exist")
+    if not Path(prompts.get("user_prompt_file", "")).exists():
+        raise typer.BadParameter("prompts.user_prompt_file does not exist")
+    if not Path(prompts.get("mcq_prompt_file", "")).exists():
+        raise typer.BadParameter("prompts.mcq_prompt_file does not exist")
+    if not Path(prompts.get("sata_prompt_file", "")).exists():
+        raise typer.BadParameter("prompts.sata_prompt_file does not exist")
     if ans.get("explanation_mode") == "gpt" and not Path(prompts.get("explanation_prompt_file", "")).exists():
         raise typer.BadParameter("prompts.explanation_prompt_file does not exist")
 
@@ -161,91 +97,6 @@ def validate_config(cfg: Dict[str, Any]) -> None:
         raise typer.BadParameter("llm.model must be set")
 
 
-def make_run_id(context_pdf: Path) -> str:
-    ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    base = slugify(context_pdf.stem)
-    return f"{ts}__{base}"
-
-
-# -------------------------
-# Core pipeline stubs (TODO)
-# -------------------------
-def make_chunks(total_pages: int, pages_per_partition: int, overlap_pages: int) -> List[Dict[str, Any]]:
-    stride = pages_per_partition - overlap_pages
-    chunks: List[Dict[str, Any]] = []
-
-    start = 1
-    idx = 1
-    while start <= total_pages:
-        end = min(start + pages_per_partition - 1, total_pages)
-        chunks.append({
-            "chunk_id": f"chunk_{idx:03d}",
-            "page_start": start,
-            "page_end": end
-        })
-        if end == total_pages:
-            break
-        start += stride
-        idx += 1
-
-    return chunks
-
-
-def postprocess_questions(
-    questions: List[Dict[str, Any]],
-    question_type: str,
-    choices_per_question: int,
-    randomize_questions: bool,
-    randomize_options: bool
-) -> List[Dict[str, Any]]:
-    # A) validate minimal structure + rules
-    seen_ids = set()
-    for q in questions:
-        # required keys
-        for k in ("stem", "choices", "correct_choice_ids", "chunk_id"):
-            if k not in q:
-                raise ValueError(f"Question missing '{k}': {q}")
-
-        if q.get("question_type") != question_type:
-            raise ValueError("Question type mismatch with config")
-
-        choices = q["choices"]
-        if not isinstance(choices, list) or len(choices) != choices_per_question:
-            raise ValueError("Choices count mismatch")
-
-        # ensure stable choice ids are present
-        choice_ids = [c.get("id") for c in choices]
-        if any((not cid) for cid in choice_ids) or len(set(choice_ids)) != len(choice_ids):
-            raise ValueError("Choice ids must be unique and non-empty")
-
-        correct = q["correct_choice_ids"]
-        if not isinstance(correct, list) or len(correct) < 1:
-            raise ValueError("correct_choice_ids must be a non-empty list")
-
-        if question_type == "MCQ" and len(correct) != 1:
-            raise ValueError("MCQ must have exactly 1 correct choice")
-        # SATA: allow >=1 (or change to >=2 if you decide)
-
-        if any(cid not in set(choice_ids) for cid in correct):
-            raise ValueError("correct_choice_ids must refer to existing choices")
-
-        # Ensure explanation field exists (empty string ok)
-        q.setdefault("explanation", "")
-
-    # B) shuffle questions (no seed)
-    if randomize_questions:
-        random.shuffle(questions)
-
-    # C) shuffle options (safe because choice ids are stable)
-    if randomize_options:
-        for q in questions:
-            random.shuffle(q["choices"])
-
-    # D) assign sequential question IDs at the end (stable, clean)
-    for i, q in enumerate(questions, start=1):
-        q["id"] = f"q_{i:04d}"
-
-    return questions
 
 
 # -------------------------
@@ -302,7 +153,9 @@ def generate(
             "context_file": context_pdf.name,
             "config_file": str(config),
             "prompt_files": {
-                "generator": cfg["prompts"]["generator_prompt_file"],
+                "user": cfg["prompts"]["user_prompt_file"],
+                "mcq_fixed": cfg["prompts"]["mcq_prompt_file"],
+                "sata_fixed": cfg["prompts"]["sata_prompt_file"],
                 "explanation": cfg["prompts"]["explanation_prompt_file"],
             },
             "llm": {
@@ -389,6 +242,7 @@ def generate(
 def explain(
     run: Path = typer.Option(..., "--run", exists=True, file_okay=False, dir_okay=True),
     wrong: Path = typer.Option(..., "--wrong", exists=True, file_okay=True, dir_okay=False),
+    verbose: bool = typer.Option(False, "--verbose"),
 ):
     """
     Add GPT explanations for wrong questions listed in wrong_ids.json.
@@ -400,25 +254,48 @@ def explain(
     if not output_path.exists() or not manifest_path.exists():
         raise typer.BadParameter("Run folder must contain output.json and manifest.json")
 
+    logger = setup_run_logger(run, verbose=verbose)
+    logger.info("Explain run: %s", run.name)
+
     wrong_obj = read_json(wrong)
     wrong_ids = wrong_obj.get("wrong_question_ids", [])
     if not isinstance(wrong_ids, list) or not all(isinstance(x, str) for x in wrong_ids):
         raise typer.BadParameter("wrong_ids.json must contain {\"wrong_question_ids\": [\"q_0001\", ...]}")
 
-    output = read_json(output_path)
     manifest = read_json(manifest_path)
+    cfg_prompt_path = Path(manifest["prompt_files"]["explanation"])
 
-    # TODO: call LLM for each wrong question and fill explanation.
-    # For now, just stub.
-    by_id = {q["id"]: q for q in output["questions"]}
-    for qid in wrong_ids:
-        if qid not in by_id:
-            continue
-        # by_id[qid]["explanation"] = llm_explain_question(...)
-        by_id[qid]["explanation"] = "TODO: explanation not implemented yet."
+    client = make_client()
+    model = manifest["llm"]["model"]
+    temperature = manifest["llm"].get("temperature", 0.2)
+    max_output_tokens = 500
+    reasoning_effort = "none"
 
-    write_json(output_path, output)
-    typer.echo(f"Updated explanations in: {output_path}")
+    def safe_echo(message: str) -> None:
+        try:
+            typer.echo(message)
+        except OSError:
+            # Avoid crashing if stdout is unavailable (e.g., piped/closed).
+            pass
+
+    try:
+        updated_output = add_explanations_for_wrong_questions(
+            output_json_path=output_path,
+            wrong_ids=wrong_ids,
+            explain_prompt_file=cfg_prompt_path,
+            client=client,
+            model=model,
+            reasoning_effort=reasoning_effort,
+            temperature=temperature,
+            max_output_tokens=max_output_tokens,
+            logger=logger
+        )
+        write_json(output_path, updated_output)
+        safe_echo(f"Updated explanations in: {output_path}")
+    except Exception:
+        logger.exception("Explain failed with an exception.")
+        safe_echo(f"Error. See log: {run / 'run.log'}")
+        raise typer.Exit(code=1)
 
 
 @app.command("list-contexts")

@@ -1,9 +1,15 @@
 You are explaining the correct answer for a medical multiple-choice or SATA question.
 
+----------------------------
+
 Inputs
 - stem: {stem}
-- choices: {choices}
-- correct_choice_ids: {correct_choice_ids}
+- choices (labeled A, B, C...): {choices}
+- correct_choice_ids (letters): {correct_choice_ids}
+
+-------------------------------
 
 Write a short, clear explanation that justifies why the correct choice(s) are correct and why the others are not.
 Be concise, clinically accurate, and grounded in the context.
+Do not mention being an AI, prompt limitations, or that the content is mock.
+Refer to answers by their choice letters and/or answer text, not internal IDs.

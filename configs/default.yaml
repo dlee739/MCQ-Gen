@@ -3,7 +3,7 @@ schema_version: 1
 generation:
   question_type: MCQ        # MCQ | SATA
   choices_per_question: 4
-  questions_per_partition: 8
+  questions_per_partition: 2
 
 partitioning:
   pages_per_partition: 5
@@ -18,11 +18,14 @@ answers:
   explain_only_wrong: true
 
 prompts:
-  generator_prompt_file: prompts/mcq_generate_v1.txt
+  user_prompt_file: prompts/default.txt
+  mcq_prompt_file: prompts/fixed_prompts/mcq_fixed_v1.txt
+  sata_prompt_file: prompts/fixed_prompts/sata_fixed_v1.txt
   explanation_prompt_file: prompts/explain_v1.txt
 
 llm:
   provider: openai
   model: gpt-5.2
+  reasoning_effort: none
   temperature: 0.2
-  max_output_tokens: 5000
+  max_output_tokens: 4000
