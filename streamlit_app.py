@@ -11,6 +11,7 @@ from mcqgen.pipeline import run_generate_pipeline
 from mcqgen.explain import add_explanations_for_wrong_questions
 from mcqgen.llm_client import make_client
 from mcqgen.run_utils import make_run_id
+from mcqgen.pdf_export import build_results_pdf
 
 CONTEXTS_DIR = Path("./contexts")
 RUNS_DIR = Path("./runs")
@@ -248,6 +249,13 @@ if st.session_state.run_dir and (st.session_state.run_dir / "output.json").exist
         st.info(f"Score: {correct_count} / {total} ({percent}%)")
 
         output = load_output(st.session_state.run_dir)
+        pdf_bytes = build_results_pdf(
+            output=output,
+            answers=st.session_state.answers,
+            title=f"MCQGen Results - {st.session_state.run_dir.name}"
+        )
+        pdf_path = st.session_state.run_dir / "results.pdf"
+        pdf_path.write_bytes(pdf_bytes)
         by_id = {q_item["id"]: q_item for q_item in output["questions"]}
         for qid in [q_item["id"] for q_item in questions]:
             q_item = by_id.get(qid)
@@ -314,33 +322,49 @@ if st.session_state.run_dir and (st.session_state.run_dir / "output.json").exist
             st.divider()
 
         if st.session_state.wrong_ids:
-            if st.button("Explain wrong answers (GPT)", disabled=use_mock_llm):
-                try:
-                    with st.spinner("Generating explanations..."):
-                        client = make_client()
-                        manifest = json.loads((st.session_state.run_dir / "manifest.json").read_text(encoding="utf-8"))
-                        explain_prompt = Path(manifest["prompt_files"]["explanation"])
-                        model = manifest["llm"]["model"]
+            action_cols = st.columns([1, 1])
+            with action_cols[0]:
+                if st.button("Explain wrong answers (GPT)", disabled=use_mock_llm):
+                    try:
+                        with st.spinner("Generating explanations..."):
+                            client = make_client()
+                            manifest = json.loads((st.session_state.run_dir / "manifest.json").read_text(encoding="utf-8"))
+                            explain_prompt = Path(manifest["prompt_files"]["explanation"])
+                            model = manifest["llm"]["model"]
 
-                        updated = add_explanations_for_wrong_questions(
-                            output_json_path=st.session_state.run_dir / "output.json",
-                            wrong_ids=st.session_state.wrong_ids,
-                            explain_prompt_file=explain_prompt,
-                            client=client,
-                            model=model,
-                            reasoning_effort=manifest["llm"].get("reasoning_effort", "none"),
-                            temperature=manifest["llm"].get("temperature", 0.2),
-                            max_output_tokens=600,
-                            logger=None
-                        )
-                        (st.session_state.run_dir / "output.json").write_text(
-                            json.dumps(updated, indent=2, ensure_ascii=False),
-                            encoding="utf-8"
-                        )
-                        st.session_state.explanations_ready = True
-                    st.success("Explanations added.")
-                    st.rerun()
-                except Exception as exc:
-                    st.error(f"Explain failed: {exc}")
+                            updated = add_explanations_for_wrong_questions(
+                                output_json_path=st.session_state.run_dir / "output.json",
+                                wrong_ids=st.session_state.wrong_ids,
+                                explain_prompt_file=explain_prompt,
+                                client=client,
+                                model=model,
+                                reasoning_effort=manifest["llm"].get("reasoning_effort", "none"),
+                                temperature=manifest["llm"].get("temperature", 0.2),
+                                max_output_tokens=600,
+                                logger=None
+                            )
+                            (st.session_state.run_dir / "output.json").write_text(
+                                json.dumps(updated, indent=2, ensure_ascii=False),
+                                encoding="utf-8"
+                            )
+                            st.session_state.explanations_ready = True
+                        st.success("Explanations added.")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Explain failed: {exc}")
+            with action_cols[1]:
+                st.download_button(
+                    "Download results PDF",
+                    data=pdf_bytes,
+                    file_name="results.pdf",
+                    mime="application/pdf"
+                )
+        else:
+            st.download_button(
+                "Download results PDF",
+                data=pdf_bytes,
+                file_name="results.pdf",
+                mime="application/pdf"
+            )
 else:
     st.caption("Generate a run first to answer questions here.")
